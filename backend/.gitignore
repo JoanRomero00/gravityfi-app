@@ -1,0 +1,14 @@
+# Python environment
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database (para no subir la DB local de pruebas)
+db.sqlite3
+
+# OS generated files
+.DS_Store
+Thumbs.db
