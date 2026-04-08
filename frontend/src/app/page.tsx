@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { logout, apiFetch } from '@/lib/api';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import TransactionModal from '@/components/TransactionModal';
 import SettingsModal from '@/components/SettingsModal';
 
@@ -25,16 +26,24 @@ export default function DashboardLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [summary, setSummary] = useState({ total_income: 0, total_expense: 0, balance: 0 });
+  const [summary, setSummary] = useState<any>({ total_income: 0, total_expense: 0, balance: 0, expenses_by_category: [] });
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Pagination & Filter State
+  const [page, setPage] = useState(1);
+  const [filterType, setFilterType] = useState('');
+  const [hasMore, setHasMore] = useState(false);
+  const [txToEdit, setTxToEdit] = useState<any>(null);
 
   const fetchDashboardData = async () => {
     try {
       const summaryData = await apiFetch('/summary/');
-      const txData = await apiFetch('/transactions/');
+      const txData = await apiFetch(`/transactions/?page=${page}${filterType ? `&type=${filterType}` : ''}`);
       setSummary(summaryData);
-      setTransactions(txData.slice(0, 5));
+      // Django returns { count, next, previous, results } due to pagination
+      setTransactions(txData.results || []);
+      setHasMore(!!txData.next);
     } catch (e) {
       console.error("Error cargando dashboard:", e);
     } finally {
@@ -44,11 +53,28 @@ export default function DashboardLayout() {
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [page, filterType]);
+
+  const openTxModal = (tx: any = null) => {
+    setTxToEdit(tx);
+    setIsTxModalOpen(true);
+  };
 
   const formatMoney = (amount: number | string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(amount));
   };
+
+  const remainingIncome = summary.total_income - summary.total_expense;
+  const chartData = [
+    ...(summary.expenses_by_category || []).map((item: any) => ({
+      name: item.category__name || 'Sin Categoría',
+      value: parseFloat(item.total),
+      color: item.category__color || '#ef4444'
+    })),
+    ...(remainingIncome > 0 ? [{ name: 'Disponible (Ahorro)', value: remainingIncome, color: '#10b981' }] : [])
+  ];
+
+  const hasDataToChart = chartData.length > 0;
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 flex overflow-hidden font-sans">
@@ -138,13 +164,13 @@ export default function DashboardLayout() {
               <span className="absolute 0 right-0 w-2 h-2 bg-sky-500 rounded-full border border-[#0B1121]"></span>
             </button>
             <button 
-              onClick={() => setIsTxModalOpen(true)}
+              onClick={() => openTxModal(null)}
               className="hidden sm:flex bg-white text-slate-950 hover:bg-slate-200 text-sm font-medium py-1.5 px-4 rounded-full items-center gap-2 transition-colors"
             >
               <Icons.Plus /> Agregar Gasto
             </button>
             <button 
-              onClick={() => setIsTxModalOpen(true)}
+              onClick={() => openTxModal(null)}
               className="sm:hidden bg-white text-slate-950 hover:bg-slate-200 w-8 h-8 rounded-full flex items-center justify-center transition-colors"
             >
               <Icons.Plus />
@@ -181,36 +207,95 @@ export default function DashboardLayout() {
                      <option>Mes Anterior</option>
                    </select>
                 </div>
-                <div className="w-full h-64 bg-gradient-to-b from-slate-800/20 to-transparent border border-dashed border-slate-800 rounded-xl flex items-center justify-center">
-                   <p className="text-slate-500 text-sm flex items-center gap-2">
-                     <Icons.PieChart /> Gráfico de resumen irá aquí
-                   </p>
+                <div className="w-full h-64 flex items-center justify-center">
+                  {loading ? (
+                    <p className="text-sm text-slate-500 pb-4">Cargando gráfico...</p>
+                  ) : hasDataToChart ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={chartData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={65}
+                          outerRadius={90}
+                          paddingAngle={3}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {chartData.map((item: any, index: number) => (
+                            <Cell key={`cell-${index}`} fill={item.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          formatter={(value: any, name: any) => [formatMoney(value), name]}
+                          contentStyle={{ backgroundColor: '#0B1121', borderColor: '#1e293b', borderRadius: '12px', color: '#f8fafc' }}
+                          itemStyle={{ color: '#e2e8f0', fontWeight: '500' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-b from-slate-800/20 to-transparent border border-dashed border-slate-800 rounded-xl flex items-center justify-center">
+                      <p className="text-slate-500 text-sm flex items-center gap-2">
+                        <Icons.PieChart /> Sin movimientos registrados
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Recent Transactions list */}
               <div className="border border-slate-800/80 bg-[#0B1121]/30 rounded-2xl flex flex-col">
-                <div className="p-6 border-b border-slate-800/80 flex justify-between items-center">
-                  <h3 className="text-base font-semibold text-white">Últimos Gastos</h3>
-                  <button className="text-sm text-sky-400 hover:text-sky-300 transition-colors">Ver todo</button>
+                <div className="p-6 border-b border-slate-800/80 flex justify-between items-center bg-[#0f172a] rounded-t-2xl">
+                  <h3 className="text-base font-semibold text-white">Últimos Movimientos</h3>
+                  <select 
+                    value={filterType} 
+                    onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
+                    className="bg-[#0B1121] border border-slate-700 text-xs text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                  >
+                    <option value="">Todos</option>
+                    <option value="expense">Solo Gastos</option>
+                    <option value="income">Solo Ingresos</option>
+                  </select>
                 </div>
-                <div className="p-2 flex-1">
-                  {loading ? (
+                <div className="p-2 flex-1 flex flex-col">
+                  {loading && transactions.length === 0 ? (
                     <p className="text-sm text-slate-500 text-center py-6">Cargando transacciones...</p>
                   ) : transactions.length === 0 ? (
-                    <p className="text-sm text-slate-500 text-center py-6">Aún no hay movimientos registrados.</p>
+                    <p className="text-sm text-slate-500 text-center py-6">No hay movimientos en este filtro.</p>
                   ) : (
-                    transactions.map((tx: any) => (
-                      <TransactionRow 
-                        key={tx.id}
-                        title={tx.description || 'Monto sin nombre'} 
-                        category={tx.type === 'income' ? 'Ingreso' : 'Gasto'} 
-                        amount={`${tx.type === 'income' ? '+' : '-'}${formatMoney(tx.amount)}`} 
-                        date={tx.date} 
-                        isIncome={tx.type === 'income'}
-                      />
-                    ))
+                    <div className="flex-1">
+                      {transactions.map((tx: any) => (
+                        <TransactionRow 
+                          key={tx.id}
+                          title={tx.description || 'Monto sin nombre'} 
+                          category={tx.type === 'income' ? 'Ingreso' : 'Gasto'} 
+                          amount={`${tx.type === 'income' ? '+' : '-'}${formatMoney(tx.amount)}`} 
+                          date={tx.date} 
+                          isIncome={tx.type === 'income'}
+                          onClick={() => openTxModal(tx)}
+                        />
+                      ))}
+                    </div>
                   )}
+                  {/* Paginación minimalista */}
+                  <div className="mt-4 pt-2 border-t border-slate-800 flex justify-between items-center px-4 pb-2">
+                    <button 
+                      onClick={() => setPage(p => Math.max(1, p - 1))} 
+                      disabled={page === 1}
+                      className="text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                    >
+                      &larr; Anterior
+                    </button>
+                    <span className="text-xs text-slate-600">Pág {page}</span>
+                    <button 
+                      onClick={() => setPage(p => p + 1)} 
+                      disabled={!hasMore}
+                      className="text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                    >
+                      Siguiente &rarr;
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -223,6 +308,7 @@ export default function DashboardLayout() {
         isOpen={isTxModalOpen} 
         onClose={() => setIsTxModalOpen(false)} 
         onSuccess={fetchDashboardData} 
+        editTx={txToEdit}
       />
 
       <SettingsModal 
@@ -268,9 +354,9 @@ function MetricCard({ title, amount, trend, isGood, invertGoodLogic = false }: {
   );
 }
 
-function TransactionRow({ title, category, amount, date, isIncome = false }: { title: string, category: string, amount: string, date: string, isIncome?: boolean }) {
+function TransactionRow({ title, category, amount, date, isIncome = false, onClick }: { title: string, category: string, amount: string, date: string, isIncome?: boolean, onClick?: () => void }) {
   return (
-    <div className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-800/40 transition-colors cursor-pointer group">
+    <div onClick={onClick} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-800/40 transition-colors cursor-pointer group">
       <div className="flex items-center gap-4">
         {/* Ícono dinámico según tipo de transacción */}
         <div className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${isIncome ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500/20' : 'bg-slate-800 border-slate-700/50 text-slate-400 group-hover:bg-slate-700 group-hover:text-white'}`}>

@@ -6,6 +6,11 @@ from .models import Account, Category, Transaction
 from .serializers import AccountSerializer, CategorySerializer, TransactionSerializer
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
+from rest_framework.pagination import PageNumberPagination
+
+class TransactionPagination(PageNumberPagination):
+    page_size = 5
+    page_size_query_param = 'page_size'
 
 class AccountViewSet(viewsets.ModelViewSet):
     serializer_class = AccountSerializer
@@ -34,6 +39,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['type', 'account', 'category']
     ordering_fields = ['date', 'amount', 'created_at']
     ordering = ['-date'] # Default ordering
+    pagination_class = TransactionPagination
 
     def get_queryset(self):
         queryset = Transaction.objects.filter(user=self.request.user)

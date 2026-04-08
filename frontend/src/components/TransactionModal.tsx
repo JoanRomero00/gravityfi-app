@@ -6,9 +6,10 @@ interface TransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  editTx?: any | null; // Data of full transaction to edit
 }
 
-export default function TransactionModal({ isOpen, onClose, onSuccess }: TransactionModalProps) {
+export default function TransactionModal({ isOpen, onClose, onSuccess, editTx }: TransactionModalProps) {
   const [type, setType] = useState('expense');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
@@ -23,21 +24,42 @@ export default function TransactionModal({ isOpen, onClose, onSuccess }: Transac
 
   useEffect(() => {
     if (isOpen) {
+      if (editTx) {
+        setType(editTx.type);
+        setAmount(editTx.amount.toString());
+        setDescription(editTx.description);
+        setDate(editTx.date);
+        if (editTx.account) setAccountId(editTx.account.toString());
+        if (editTx.category) setCategoryId(editTx.category.toString());
+      } else {
+        setAmount('');
+        setDescription('');
+      }
+
       Promise.all([
         apiFetch('/accounts/'),
         apiFetch('/categories/')
       ]).then(([accs, cats]) => {
         setAccounts(accs);
         setCategories(cats);
-        if (accs.length > 0) setAccountId(accs[0].id.toString());
-        if (cats.length > 0) setCategoryId(cats[0].id.toString());
+        if (!editTx) {
+          if (accs.length > 0) setAccountId(accs[0].id.toString());
+          if (cats.length > 0) setCategoryId(cats[0].id.toString());
+        }
       }).catch(e => console.error(e));
-    } else {
-      // Limpiar campos para nueva entrada
-      setAmount('');
-      setDescription('');
     }
-  }, [isOpen]);
+  }, [isOpen, editTx]);
+
+  const handleDelete = async () => {
+    if(!confirm("¿Eliminar este movimiento permanentemente?")) return;
+    setLoading(true);
+    try {
+      await apiFetch(`/transactions/${editTx.id}/`, { method: 'DELETE' });
+      onSuccess();
+      onClose();
+    } catch(e: any) { setError(e.message) }
+    finally { setLoading(false) }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,8 +67,11 @@ export default function TransactionModal({ isOpen, onClose, onSuccess }: Transac
     setError('');
 
     try {
-      await apiFetch('/transactions/', {
-        method: 'POST',
+      const url = editTx ? `/transactions/${editTx.id}/` : '/transactions/';
+      const method = editTx ? 'PUT' : 'POST';
+
+      await apiFetch(url, {
+        method,
         body: JSON.stringify({
           type,
           amount: parseFloat(amount),
@@ -88,10 +113,19 @@ export default function TransactionModal({ isOpen, onClose, onSuccess }: Transac
       >
         
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-lg font-bold text-white tracking-tight">Nueva Transacción</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
+          <h2 className="text-lg font-bold text-white tracking-tight">
+            {editTx ? 'Editar Movimiento' : 'Nueva Transacción'}
+          </h2>
+          <div className="flex items-center gap-2">
+            {editTx && (
+              <button type="button" onClick={handleDelete} title="Eliminar" disabled={loading} className="p-1 text-slate-500 hover:text-rose-400 focus:outline-none transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="p-1 text-slate-500 hover:text-white transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -188,7 +222,7 @@ export default function TransactionModal({ isOpen, onClose, onSuccess }: Transac
               disabled={loading}
               className={`w-full font-semibold py-3 px-4 rounded-xl transition-all flex justify-center items-center gap-2 ${type === 'expense' ? 'bg-sky-500 hover:bg-sky-400 text-white shadow-lg shadow-sky-500/20' : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/20'} disabled:opacity-50`}
             >
-              {loading ? 'Cargando...' : `Confirmar ${type === 'expense' ? 'Gasto' : 'Ingreso'}`}
+              {loading ? 'Procesando...' : editTx ? 'Guardar Cambios' : `Confirmar ${type === 'expense' ? 'Gasto' : 'Ingreso'}`}
             </button>
           </div>
 
